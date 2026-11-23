@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#14161c">
+<title>三阶魔方公式练习器</title>
+<style>
+  :root{
+    --bg:#14161c; --panel:#1b1e26; --line:#2b303c;
+    --btn:#222731; --btn-active:#3a4356;
+    --text:#e8eaed; --muted:#8b93a3;
+    --accent:#4d9fff;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;overscroll-behavior:none}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex;flex-direction:column;height:100vh;height:100dvh;
+    user-select:none;-webkit-user-select:none;position:fixed;inset:0;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  }
+
+  /* ---------- 3D 视口 ---------- */
+  #viewport{
+    flex:1 1 auto;min-height:0;position:relative;overflow:hidden;
+    background:radial-gradient(circle at 50% 38%, #20263a 0%, #14161c 62%, #0e1015 100%);
+  }
+  #viewport canvas{display:block;touch-action:none}
+
+  #viewStatus{
+    /* body 已预留刘海安全区；状态栏保持在视口内部，避免负偏移被裁切。 */
+    position:absolute;inset:7px 10px auto;display:flex;align-items:flex-start;
+    justify-content:space-between;gap:6px;pointer-events:none;
+  }
+  #hint{
+    min-width:0;
+    font-size:11px;line-height:1.55;color:var(--muted);
+    background:rgba(16,18,24,.6);border:1px solid rgba(255,255,255,.06);
+    padding:6px 10px;border-radius:9px;pointer-events:none;
+    backdrop-filter:blur(6px);
+  }
+  #fBadge{
+    flex:0 0 auto;display:flex;align-items:center;gap:5px;
+    font-size:12px;font-weight:700;letter-spacing:.3px;
+    background:rgba(16,18,24,.6);border:1px solid rgba(77,159,255,.3);
+    color:var(--accent);padding:6px 10px;border-radius:9px;
+    backdrop-filter:blur(6px);pointer-events:none;white-space:nowrap;
+  }
+  #fBadge .sw{
+    width:12px;height:12px;border-radius:3px;
+    border:1px solid rgba(255,255,255,.4);flex:0 0 auto;display:inline-block;
+  }
+  #fBadge .sep{opacity:.35;margin:0 1px}
+
+  /* ---------- 控制面板 ---------- */
+  #panel{
+    flex:0 0 auto;max-height:64vh;max-height:64dvh;
+    overflow-y:auto;overscroll-behavior:contain;
+    /* 底部留白与 Home 指示条安全区取较大值，避免重复叠加。 */
+    padding:10px 10px max(8px, env(safe-area-inset-bottom));
+    background:var(--panel);border-top:1px solid var(--line);
+    -webkit-overflow-scrolling:touch;
+  }
+
+  .row{display:flex;gap:6px;margin-bottom:7px}
+  .row > *{min-width:0}
+
+  input[type=text]{
+    flex:1 1 auto;background:#11141a;border:1px solid var(--line);border-radius:9px;
+    color:var(--text);font-size:16px;padding:10px 11px;outline:none;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:-.3px;word-spacing:-3px;
+    transition:opacity .15s;
+  }
+  input[type=text]:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(77,159,255,.16)}
+  #formulaInput.dimmed{opacity:.45}
+
+  button{
+    background:var(--btn);color:var(--text);border:1px solid var(--line);
+    border-radius:9px;font-size:14px;font-weight:600;padding:10px 12px;
+    cursor:pointer;transition:background .12s,transform .06s;white-space:nowrap;
+    font-family:inherit;
+  }
+  button:active{background:var(--btn-active);transform:scale(.96)}
+  button.primary{background:#1d4e8f;border-color:#2a6ab8;color:#dceaff}
+  button.primary:active{background:#255fa8}
+  button.ghost{background:transparent;border-color:var(--line);color:var(--muted)}
+  button.sm{padding:8px 10px;font-size:13px}
+
+  #btnMode{
+    flex:0 0 auto;background:#1d4e8f;border-color:#2a6ab8;color:#dceaff;font-size:13px;
+  }
+  #btnMode.operate{background:#4a2f10;border-color:#6b4a1c;color:#ffd9a0}
+
+  /* 按键区 */
+  #keyArea{margin-bottom:6px}
+  .keys-row{display:flex;gap:6px;margin-bottom:6px}
+  .k-group{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:4px;
+    flex:1 1 0;min-width:0;
+  }
+  .k-group.single{
+    grid-template-columns:repeat(6,1fr);flex:1 1 100%;width:100%;
+  }
+  .k-group button{
+    padding:11px 0;font-size:13px;font-weight:700;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    background:var(--btn);border-color:#333a48;min-width:0;
+  }
+  .k-group button:active{background:var(--btn-active)}
+  .k-group.single button{background:#2a2340;border-color:#3d3260;color:#d8c9ff}
+
+  .section-title{
+    font-size:11px;color:var(--muted);letter-spacing:1px;
+    margin:10px 0 6px;font-weight:700;text-transform:uppercase;
+  }
+
+  /* 公式列表 */
+  #savedList{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+  .saved-item{
+    display:flex;align-items:center;gap:7px;background:#161a22;
+    border:1px solid var(--line);border-radius:10px;padding:7px 9px;
+  }
+  .saved-item .info{flex:1 1 auto;min-width:0}
+  .saved-item .nm{
+    font-size:13px;font-weight:600;color:#cfd6e2;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .saved-item .fm{
+    font-size:12px;color:var(--muted);
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;
+    letter-spacing:-.3px;word-spacing:-2px;
+  }
+  .saved-item .empty{font-size:12px;color:#5c6474;padding:6px 2px}
+  .empty-tip{font-size:12px;color:#5c6474;padding:6px 2px}
+
+  #toast{
+    position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));
+    transform:translateX(-50%) translateY(20px);
+    background:rgba(30,34,44,.96);border:1px solid #39404f;color:#e8eaed;
+    padding:9px 16px;border-radius:10px;font-size:13px;
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+    z-index:99;white-space:nowrap;max-width:88vw;overflow:hidden;text-overflow:ellipsis;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<div id="viewport">
+  <canvas id="cv"></canvas>
+  <div id="viewStatus">
+    <div id="hint">单指拖动旋转 · 双指捏合缩放 · 双指扭转</div>
+    <div id="fBadge">
+      <span class="sw" id="fSwatch"></span><span id="fText">F:—</span>
+      <span class="sep">;</span>
+      <span class="sw" id="dSwatch"></span><span id="dText">D:—</span>
+    </div>
+  </div>
+</div>
+
+<div id="panel">
+  <div class="row">
+    <input type="text" id="formulaInput" placeholder="输入公式，如  R U R' U'  （支持括号重复）" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off">
+    <button class="primary" id="btnReverse">↺ 反推</button>
+  </div>
+
+  <div class="row">
+    <button id="btnMode" class="sm">✏️ 输入模式</button>
+    <button class="sm" id="btnScramble" style="flex:1">🎲 随机打乱</button>
+    <button class="sm" id="btnReset" style="flex:1">⟲ 复位</button>
+    <button class="sm ghost" id="btnClearInput" style="flex:0 0 auto">清空</button>
+  </div>
+
+  <div id="keyArea">
+    <div class="keys-row">
+      <div class="k-group" id="kgL"></div>
+      <div class="k-group" id="kgR"></div>
+    </div>
+    <div class="keys-row">
+      <div class="k-group" id="kgP"></div>
+      <div class="k-group" id="kgN"></div>
+    </div>
+    <div class="keys-row">
+      <div class="k-group" id="kgWideInverse"></div>
+      <div class="k-group" id="kgWide"></div>
+    </div>
+    <div class="keys-row">
+      <div class="k-group single" id="kgS"></div>
+    </div>
+    <div class="keys-row">
+      <div class="k-group single" id="kgRotation"></div>
+    </div>
+  </div>
+
+  <div class="section-title">我的公式</div>
+  <div class="row">
+    <input type="text" id="nameInput" placeholder="公式名称" style="font-family:inherit;letter-spacing:0;word-spacing:0">
+    <button id="btnSave">保存</button>
+  </div>
+  <div class="row">
+    <button class="sm" id="btnExport" style="flex:1">⬆ 导出 txt</button>
+    <button class="sm" id="btnImport" style="flex:1">⬇ 导入 txt</button>
+    <input type="file" id="fileInput" accept=".txt,text/plain" style="display:none">
+  </div>
+  <div id="savedList"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+/* =========================================================
+   1. 数学工具
+   ========================================================= */
+const clamp = (v,a,b)=> v<a?a:(v>b?b:v);
+
+function qFromAxis(x,y,z,ang){
+  const h = ang/2, s = Math.sin(h);
+  return [x*s, y*s, z*s, Math.cos(h)];
+}
+function qMul(a,b){
+  const [ax,ay,az,aw]=a, [bx,by,bz,bw]=b;
+  return [
+    aw*bx + ax*bw + ay*bz - az*by,
+    aw*by - ax*bz + ay*bw + az*bx,
+    aw*bz + ax*by - ay*bx + az*bw,
+    aw*bw - ax*bx - ay*by - az*bz
+  ];
+}
+function qNormalize(q){
+  const l = Math.hypot(q[0],q[1],q[2],q[3]) || 1;
+  return [q[0]/l, q[1]/l, q[2]/l, q[3]/l];
+}
+function qToMat(q){
+  const [x,y,z,w] = q;
+  const x2=x+x, y2=y+y, z2=z+z;
+  const xx=x*x2, xy=x*y2, xz=x*z2;
+  const yy=y*y2, yz=y*z2, zz=z*z2;
+  const wx=w*x2, wy=w*y2, wz=w*z2;
+  return [
+    1-(yy+zz), xy-wz,     xz+wy,
+    xy+wz,     1-(xx+zz), yz-wx,
+    xz-wy,     yz+wx,     1-(xx+yy)
+  ];
+}
+function mv(m,v){
+  return [
+    m[0]*v[0]+m[1]*v[1]+m[2]*v[2],
+    m[3]*v[0]+m[4]*v[1]+m[5]*v[2],
+    m[6]*v[0]+m[7]*v[1]+m[8]*v[2]
+  ];
+}
+function mm(a,b){
+  const r = new Array(9);
+  for(let i=0;i<3;i++){
+    for(let j=0;j<3;j++){
+      r[i*3+j] = a[i*3]*b[j] + a[i*3+1]*b[3+j] + a[i*3+2]*b[6+j];
+    }
+  }
+  return r;
+}
+
+/* =========================================================
+   2. 颜色与方向
+   ========================================================= */
+// v1 的配色绕 X 轴旋转 180°，把白面转到底部。
+const STICKER_COLORS = {
+  '0,-1,0':'#f4f4f4', '0,1,0':'#ffd500',
+  '0,0,1':'#0051ba', '0,0,-1':'#00a651',
+  '1,0,0':'#d2232a', '-1,0,0':'#ff8c00'
+};
+const COLOR_NAMES = {
+  '#f4f4f4':'白', '#ffd500':'黄', '#00a651':'绿',
+  '#0051ba':'蓝', '#d2232a':'红', '#ff8c00':'橙'
+};
+
+const FACE_DEFS = [
+  {n:[ 1, 0, 0], c:[[ 1,-1,-1],[ 1, 1,-1],[ 1, 1, 1],[ 1,-1, 1]]},
+  {n:[-1, 0, 0], c:[[-1,-1, 1],[-1, 1, 1],[-1, 1,-1],[-1,-1,-1]]},
+  {n:[ 0, 1, 0], c:[[-1, 1, 1],[ 1, 1, 1],[ 1, 1,-1],[-1, 1,-1]]},
+  {n:[ 0,-1, 0], c:[[-1,-1,-1],[ 1,-1,-1],[ 1,-1, 1],[-1,-1, 1]]},
+  {n:[ 0, 0, 1], c:[[-1,-1, 1],[ 1,-1, 1],[ 1, 1, 1],[-1, 1, 1]]},
+  {n:[ 0, 0,-1], c:[[ 1,-1,-1],[-1,-1,-1],[-1, 1,-1],[ 1, 1,-1]]}
+];
+
+const VIEW_DIRS = {
+  U:[0, 1, 0], D:[0,-1, 0],
+  F:[0, 0, 1], B:[0, 0,-1],
+  R:[1, 0, 0], L:[-1, 0, 0]
+};
+
+/* =========================================================
+   3. 魔方数据
+   ========================================================= */
+let cubies = [];
+
+let centerColors;
+
+function updateCenterColors(){
+  centerColors = {};
+  for(const cubie of cubies){
+    if(cubie.stickers.length === 1){
+      centerColors[cubie.pos.join(',')] = cubie.stickers[0].color;
+    }
+  }
+}
+
+function buildCubies(){
+  const list = [];
+  for(let x=-1;x<=1;x++){
+    for(let y=-1;y<=1;y++){
+      for(let z=-1;z<=1;z++){
+        if(x===0 && y===0 && z===0) continue;
+        const stickers = [];
+        for(const f of FACE_DEFS){
+          const n = f.n;
+          if(x*n[0] + y*n[1] + z*n[2] === 1){
+            const key = n.join(',');
+            stickers.push({
+              n: n.slice(),
+              corners: f.c,
+              color: STICKER_COLORS[key]
+            });
+          }
+        }
+        list.push({
+          pos: [x,y,z],
+          mat: [1,0,0, 0,1,0, 0,0,1],
+          stickers
+        });
+      }
+    }
+  }
+  return list;
+}
+
+/* =========================================================
+   4. 视角
+   ========================================================= */
+let quat;
+let zoom = 1.0;
+
+function randomizeView(){
+  const front = Math.floor(Math.random()*4) * Math.PI/2;
+  const yaw = (Math.random() < 0.5 ? -1 : 1) * 28 * Math.PI/180;
+  const pitch = (23 + Math.random()*7) * Math.PI/180;
+  quat = qNormalize(qMul(qFromAxis(1,0,0,pitch), qFromAxis(0,1,0,front + yaw)));
+  zoom = 1.0;
+}
+
+/* =========================================================
+   5. 渲染
+   ========================================================= */
+const viewport = document.getElementById('viewport');
+const canvas   = document.getElementById('cv');
+const ctx      = canvas.getContext('2d');
+
+let vpW = 300, vpH = 300, dpr = 1;
+
+const CUBIE_SCALE = 0.94;
+const CAM_DIST    = 8.0;
+
+function resize(){
+  const rect = viewport.getBoundingClientRect();
+  vpW = Math.max(1, rect.width);
+  vpH = Math.max(1, rect.height);
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width  = Math.round(vpW * dpr);
+  canvas.height = Math.round(vpH * dpr);
+  canvas.style.width  = vpW + 'px';
+  canvas.style.height = vpH + 'px';
+}
+
+function render(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,vpW,vpH);
+
+  const R = qToMat(quat);
+  const cx = vpW/2, cy = vpH/2;
+  const focal = Math.min(vpW,vpH) * 1.28 * zoom;
+  const dist  = CAM_DIST;
+  const faces = [];
+
+  for(let i=0;i<cubies.length;i++){
+    const cubie = cubies[i];
+    const p = cubie.pos, m = cubie.mat;
+    const sts = cubie.stickers;
+
+    for(let s=0;s<sts.length;s++){
+      const st = sts[s];
+      const wn = mv(m, st.n);
+      const vn = mv(R, wn);
+      if(vn[2] <= 0.02) continue;
+
+      const ccx = p[0] + wn[0]*0.5;
+      const ccy = p[1] + wn[1]*0.5;
+      const ccz = p[2] + wn[2]*0.5;
+      const vcz = R[6]*ccx + R[7]*ccy + R[8]*ccz;
+      const depth = dist - vcz;
+      if(depth <= 0.4) continue;
+
+      const pts = [];
+      const cs = st.corners;
+      for(let k=0;k<4;k++){
+        const c = cs[k];
+        const lx = c[0]*0.5*CUBIE_SCALE;
+        const ly = c[1]*0.5*CUBIE_SCALE;
+        const lz = c[2]*0.5*CUBIE_SCALE;
+
+        const wx = m[0]*lx + m[1]*ly + m[2]*lz + p[0];
+        const wy = m[3]*lx + m[4]*ly + m[5]*lz + p[1];
+        const wz = m[6]*lx + m[7]*ly + m[8]*lz + p[2];
+
+        const vx = R[0]*wx + R[1]*wy + R[2]*wz;
+        const vy = R[3]*wx + R[4]*wy + R[5]*wz;
+        const vz = R[6]*wx + R[7]*wy + R[8]*wz;
+
+        const d2 = dist - vz;
+        pts.push([ cx + focal*vx/d2, cy - focal*vy/d2 ]);
+      }
+      faces.push({depth, pts, color: st.color});
+    }
+  }
+
+  faces.sort((a,b)=> b.depth - a.depth);
+
+  for(let i=0;i<faces.length;i++){
+    const f = faces[i];
+    const pts = f.pts;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for(let k=1;k<4;k++) ctx.lineTo(pts[k][0], pts[k][1]);
+    ctx.closePath();
+    ctx.fillStyle = f.color;
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(0,0,0,.5)';
+    ctx.stroke();
+  }
+}
+
+/* =========================================================
+   6. 转动引擎
+   ========================================================= */
+let moveQueue = [];
+let animState = null;
+const ANIM_DUR = 115;
+
+function viewToWorld(v){
+  const R = qToMat(quat);
+  return [
+    R[0]*v[0] + R[3]*v[1] + R[6]*v[2],
+    R[1]*v[0] + R[4]*v[1] + R[7]*v[2],
+    R[2]*v[0] + R[5]*v[1] + R[8]*v[2]
+  ];
+}
+
+function snapAxis(v, excludedIdx = -1){
+  if(excludedIdx >= 0) v[excludedIdx] = 0;
+  const ax = Math.abs(v[0]), ay = Math.abs(v[1]), az = Math.abs(v[2]);
+  let idx = 0;
+  if(ay > ax && ay >= az) idx = 1;
+  else if(az > ax && az > ay) idx = 2;
+  const sign = v[idx] >= 0 ? 1 : -1;
+  const axis = [0,0,0];
+  axis[idx] = sign;
+  return {axis, idx, sign};
+}
+
+let frameQuat;
+let viewAxes;
+
+function getViewAxes(){
+  if(frameQuat === quat) return viewAxes;
+
+  // 先选正面，再在与正面垂直的方向中选底面。
+  const f = snapAxis(viewToWorld(VIEW_DIRS.F));
+  const d = snapAxis(viewToWorld(VIEW_DIRS.D), f.idx);
+  const r = [
+    f.axis[1]*d.axis[2] - f.axis[2]*d.axis[1],
+    f.axis[2]*d.axis[0] - f.axis[0]*d.axis[2],
+    f.axis[0]*d.axis[1] - f.axis[1]*d.axis[0]
+  ];
+  const opposite = axis => axis.map(v => -v);
+  viewAxes = {
+    F:f, B:snapAxis(opposite(f.axis)),
+    D:d, U:snapAxis(opposite(d.axis)),
+    R:snapAxis(r), L:snapAxis(opposite(r))
+  };
+  frameQuat = quat;
+  return viewAxes;
+}
+
+function makeMove(token, inverse){
+  const face = token[0];
+  const upper = face.toUpperCase();
+  const sliceFace = {M:'L', E:'D', S:'F'}[upper];
+  // 整体转动方向分别与 R / U / F 一致，三个层一起转动。
+  const rotationFace = {x:'R', y:'U', z:'F'}[face];
+  const {axis, idx, sign} = getViewAxes()[rotationFace || sliceFace || upper];
+  const layerVals = rotationFace ? [-1, 0, 1] : sliceFace ? [0] : face === upper ? [sign] : [sign, 0];
+  const suffix = token.slice(1);
+  const turns = suffix.startsWith('2') ? 2 : 1;
+  const dir = suffix === "'" ? 1 : -1;
+  return {axis, axisIdx: idx, layerVals, total: Math.PI/2 * turns * (inverse ? -dir : dir)};
+}
+
+function enqueueMoves(tokens, inverse = false){
+  for(let i=0;i<tokens.length;i++){
+    const token = tokens[inverse ? tokens.length-1-i : i];
+    moveQueue.push(makeMove(token, inverse));
+  }
+  pump();
+}
+
+function pump(){
+  if(animState || moveQueue.length === 0) return;
+  const m = moveQueue.shift();
+
+  const snaps = [];
+  for(let i=0;i<cubies.length;i++){
+    const c = cubies[i];
+    if(m.layerVals.indexOf(Math.round(c.pos[m.axisIdx])) >= 0){
+      snaps.push({c, pos: c.pos.slice(), mat: c.mat.slice()});
+    }
+  }
+  animState = {snaps, axis: m.axis, total: m.total, start: performance.now()};
+}
+
+function updateAnim(now){
+  if(!animState) return;
+  const t = clamp((now - animState.start) / ANIM_DUR, 0, 1);
+  const e = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t+2, 2)/2;
+  const ang = animState.total * e;
+  const a = animState.axis;
+  const rot = qToMat(qFromAxis(a[0], a[1], a[2], ang));
+
+  const snaps = animState.snaps;
+  for(let i=0;i<snaps.length;i++){
+    const s = snaps[i];
+    s.c.pos = mv(rot, s.pos);
+    s.c.mat = mm(rot, s.mat);
+  }
+
+  if(t >= 1){
+    for(let i=0;i<snaps.length;i++){
+      const s = snaps[i];
+      s.c.pos = s.c.pos.map(v => Math.round(v) + 0);
+      s.c.mat = s.c.mat.map(v => Math.round(v) + 0);
+    }
+    animState = null;
+    updateCenterColors();
+    pump();
+  }
+}
+
+/* =========================================================
+   7. 公式清洗 / 解析（支持括号 + 重复次数）
+   ========================================================= */
+function normalizeFormula(str){
+  return String(str ?? '')
+    .replace(/[\u2018\u2019\u201B\u2032\u2035\u02BC\u00B4\x60\uFF07]/g, "'")
+    .replace(/[\s,，;；、]+/g, '');
+}
+
+const MAX_FORMULA_MOVES = 10000;
+
+function expandFormula(formula){
+  const tokenRe = /([RLUDBFrludbfMESxyz](?:2'?|')?)|(\()|\)(\d*)/gy;
+  const groups = [[]];
+
+  while(tokenRe.lastIndex < formula.length){
+    const token = tokenRe.exec(formula);
+    if(!token) return null;
+
+    const current = groups[groups.length-1];
+    const [, move, open, count] = token;
+    if(move){
+      if(current.length >= MAX_FORMULA_MOVES) return null;
+      current.push(move);
+    }else if(open){
+      groups.push([]);
+    }else{
+      if(groups.length === 1 || current.length === 0) return null;
+      const repeat = count === '' ? 1 : Number(count);
+      const parent = groups[groups.length-2];
+      if(repeat > 100 || parent.length + current.length*repeat > MAX_FORMULA_MOVES) return null;
+      groups.pop();
+      for(let i=0;i<repeat;i++) parent.push(...current);
+    }
+  }
+
+  return groups.length === 1 && groups[0].length ? groups[0] : null;
+}
+
+/* =========================================================
+   9. 复位 / 打乱
+   ========================================================= */
+function resetCube(){
+  moveQueue.length = 0;
+  animState = null;
+  cubies = buildCubies();
+  updateCenterColors();
+  randomizeView();
+}
+
+function scramble(){
+  const faces = ['R','L','U','D','B','F'];
+  const last = [];
+  const seq = [];
+  for(let i=0;i<22;i++){
+    let f, guard = 0;
+    do{
+      f = faces[Math.floor(Math.random()*6)];
+      guard++;
+    }while(last.indexOf(f) >= 0 && guard < 30);
+    last.push(f);
+    if(last.length > 2) last.shift();
+
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const turns = Math.random() < 0.22 ? 2 : 1;
+
+    let t = f;
+    if(turns === 2) t += '2';
+    else if(dir === -1) t += "'";
+    seq.push(t);
+  }
+  enqueueMoves(seq);
+}
+
+/* =========================================================
+   10. 触摸交互
+   ========================================================= */
+let pointers = new Map();
+let drag = null;
+let pinch = null;
+
+function rotateView(dx, dy){
+  const k = 0.0075;
+  const q1 = qFromAxis(0,1,0, dx*k);
+  const q2 = qFromAxis(1,0,0, dy*k);
+  quat = qNormalize(qMul(qMul(q2,q1), quat));
+}
+
+function getTwoPointers(){
+  const arr = [];
+  for(const v of pointers.values()) arr.push(v);
+  return arr.length >= 2 ? [arr[0], arr[1]] : null;
+}
+
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  if(pointers.size >= 2) return;
+  try{ canvas.setPointerCapture(e.pointerId); }catch(_){}
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+  if(pointers.size === 1){
+    drag  = {x:e.clientX, y:e.clientY};
+    pinch = null;
+  }else if(pointers.size === 2){
+    const p = getTwoPointers();
+    pinch = {
+      d: Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y),
+      a: Math.atan2(p[1].y-p[0].y, p[1].x-p[0].x)
+    };
+  }
+});
+
+canvas.addEventListener('pointermove', e => {
+  if(!pointers.has(e.pointerId)) return;
+  e.preventDefault();
+  pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+  if(pointers.size === 1 && drag){
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    if(dx || dy) rotateView(dx, dy);
+  }else if(pointers.size === 2 && pinch){
+    const p = getTwoPointers();
+    const d   = Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y);
+    const ang = Math.atan2(p[1].y-p[0].y, p[1].x-p[0].x);
+
+    if(pinch.d > 12 && d > 12){
+      zoom = clamp(zoom * (d / pinch.d), 0.55, 3.0);
+
+      let dAng = ang - pinch.a;
+      if(dAng >  Math.PI) dAng -= Math.PI*2;
+      if(dAng < -Math.PI) dAng += Math.PI*2;
+      // 屏幕 Y 轴向下，三维坐标 Y 轴向上。
+      quat = qNormalize(qMul(qFromAxis(0,0,1, -dAng), quat));
+    }
+    pinch.d = d;
+    pinch.a = ang;
+  }
+});
+
+function onPointerUp(e){
+  if(!pointers.delete(e.pointerId)) return;
+  if(pointers.size === 0){
+    drag = null; pinch = null;
+  }else if(pointers.size === 1){
+    pinch = null;
+    const p = pointers.values().next().value;
+    drag = {x:p.x, y:p.y};
+  }
+}
+canvas.addEventListener('pointerup', onPointerUp);
+canvas.addEventListener('pointercancel', onPointerUp);
+canvas.addEventListener('lostpointercapture', onPointerUp);
+
+/* =========================================================
+   11. 界面
+   ========================================================= */
+const formulaInput = document.getElementById('formulaInput');
+const nameInput    = document.getElementById('nameInput');
+const btnMode      = document.getElementById('btnMode');
+const toastEl      = document.getElementById('toast');
+let toastTimer = null;
+
+let mode = 'input'; // 'input' | 'operate'
+
+function toast(msg){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> toastEl.classList.remove('show'), 1600);
+}
+
+/* ---------- 按键布局 ---------- */
+function makeBtns(arr){
+  return arr.map(m => '<button data-move="' + m + '">' + m + '</button>').join('');
+}
+
+function buildKeys(){
+  // 最左：L 系 ；最右：R 系
+  document.getElementById('kgL').innerHTML = makeBtns(["L'", 'L', "l'", 'l']);
+  document.getElementById('kgR').innerHTML = makeBtns(["r'", 'r', "R'", 'R']);
+  // D / B 及对应宽层的正反向按键交换位置。
+  document.getElementById('kgP').innerHTML = makeBtns(["U'", 'D', "F'", 'B']);
+  document.getElementById('kgN').innerHTML = makeBtns(["B'", 'F', "D'", 'U']);
+  document.getElementById('kgWideInverse').innerHTML = makeBtns(["u'", 'd', "f'", 'b']);
+  document.getElementById('kgWide').innerHTML = makeBtns(["b'", 'f', "d'", 'u']);
+  // 中层
+  document.getElementById('kgS').innerHTML = makeBtns(["S'", 'E', 'M', "M'", "E'", "S'"]);
+  // 整体转动
+  document.getElementById('kgRotation').innerHTML = makeBtns(['x', "x'", 'y', "y'", 'z', "z'"]);
+}
+buildKeys();
+
+function handleKeyClick(mv){
+  if(!mv) return;
+  if(mode === 'input'){
+    formulaInput.value = formulaInput.value.trimEnd() + mv;
+    formulaInput.scrollLeft = formulaInput.scrollWidth;
+  }
+  enqueueMoves([mv]);
+}
+
+document.getElementById('keyArea').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if(b) handleKeyClick(b.getAttribute('data-move'));
+});
+
+/* ---------- 模式切换 ---------- */
+function updateModeUI(){
+  if(mode === 'input'){
+    btnMode.textContent = '✏️ 输入模式';
+    btnMode.classList.remove('operate');
+    formulaInput.classList.remove('dimmed');
+  }else{
+    btnMode.textContent = '🖐 操作模式';
+    btnMode.classList.add('operate');
+    formulaInput.classList.add('dimmed');
+  }
+}
+btnMode.addEventListener('click', () => {
+  mode = (mode === 'input') ? 'operate' : 'input';
+  updateModeUI();
+  toast(mode === 'input' ? '公式输入模式：按键会写入公式' : '操作模式：按键只转动魔方');
+});
+updateModeUI();
+
+/* ---------- 粘贴清洗 ---------- */
+formulaInput.addEventListener('paste', e => {
+  const cd = e.clipboardData || window.clipboardData;
+  if(!cd) return;
+  const text = cd.getData('text');
+  if(!text) return;
+  e.preventDefault();
+  const cleaned = normalizeFormula(text);
+  const start = formulaInput.selectionStart ?? formulaInput.value.length;
+  const end   = formulaInput.selectionEnd   ?? formulaInput.value.length;
+  const cur   = formulaInput.value;
+  formulaInput.value = cur.slice(0,start) + cleaned + cur.slice(end);
+  const pos = start + cleaned.length;
+  try{ formulaInput.setSelectionRange(pos, pos); }catch(_){}
+});
+
+/* ---------- 反推 ---------- */
+document.getElementById('btnReverse').addEventListener('click', () => {
+  const f = normalizeFormula(formulaInput.value);
+  if(!f){ toast('请先输入公式'); return; }
+  const tokens = expandFormula(f);
+  if(!tokens){ toast('公式无效，请检查记号和括号'); return; }
+  formulaInput.value = f;
+  enqueueMoves(tokens, true);
+  toast('正在反推公式');
+});
+
+/* ---------- 随机打乱 / 复位 ---------- */
+document.getElementById('btnScramble').addEventListener('click', () => {
+  if(mode === 'input') formulaInput.value = '';
+  scramble();
+  toast('已随机打乱');
+});
+
+document.getElementById('btnReset').addEventListener('click', () => {
+  resetCube();
+  toast('魔方已复位（白底朝下）');
+});
+
+document.getElementById('btnClearInput').addEventListener('click', () => {
+  formulaInput.value = '';
+});
+
+/* =========================================================
+   12. 公式收藏
+   ========================================================= */
+const LS_KEY = 'cubeFormulaPractice_v2';
+let savedFormulas = [];
+const savedListEl = document.getElementById('savedList');
+
+function loadSaved(){
+  try{
+    const raw = localStorage.getItem(LS_KEY) ?? localStorage.getItem('cubeFormulaPractice_v1');
+    if(raw){
+      const arr = JSON.parse(raw);
+      if(Array.isArray(arr)){
+        savedFormulas = arr.filter(x => x && x.name && x.formula)
+                           .map(x => ({name:String(x.name), formula:String(x.formula)}));
+      }
+    }
+  }catch(_){ savedFormulas = []; }
+}
+
+function persist(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(savedFormulas)); }catch(_){}
+  renderSavedList();
+}
+
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderSavedList(){
+  if(savedFormulas.length === 0){
+    savedListEl.innerHTML = '<div class="empty-tip">还没有保存的公式，输入后点「保存」即可。</div>';
+    return;
+  }
+  let html = '';
+  for(let i=0;i<savedFormulas.length;i++){
+    const f = savedFormulas[i];
+    html += '<div class="saved-item">'
+          +   '<div class="info">'
+          +     '<div class="nm">' + esc(f.name) + '</div>'
+          +     '<div class="fm">' + esc(f.formula) + '</div>'
+          +   '</div>'
+          +   '<button class="sm primary" data-act="apply" data-idx="' + i + '">练习</button>'
+          +   '<button class="sm ghost" data-act="del" data-idx="' + i + '">✕</button>'
+          + '</div>';
+  }
+  savedListEl.innerHTML = html;
+}
+
+savedListEl.addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if(!btn) return;
+  const idx = parseInt(btn.getAttribute('data-idx'), 10);
+  const act = btn.getAttribute('data-act');
+  if(!(idx >= 0 && idx < savedFormulas.length)) return;
+
+  if(act === 'apply'){
+    const f = savedFormulas[idx];
+    const formula = normalizeFormula(f.formula);
+    const tokens = expandFormula(formula);
+    if(!tokens){ toast('收藏的公式无效，请检查记号和括号'); return; }
+    formulaInput.value = formula;
+    nameInput.value = f.name;
+    enqueueMoves(tokens, true);
+    toast('正在反推「' + f.name + '」');
+  }else if(act === 'del'){
+    savedFormulas.splice(idx,1);
+    persist();
+    toast('已删除');
+  }
+});
+
+document.getElementById('btnSave').addEventListener('click', () => {
+  const formula = normalizeFormula(formulaInput.value);
+  if(!formula){ toast('公式为空，无法保存'); return; }
+  if(!expandFormula(formula)){ toast('公式无效，无法保存'); return; }
+  formulaInput.value = formula;
+
+  let name = nameInput.value.trim();
+  if(!name) name = '公式 ' + (savedFormulas.length + 1);
+
+  savedFormulas.push({name, formula});
+  persist();
+  nameInput.value = '';
+  toast('已保存：' + name);
+});
+
+/* ---------- 导入 / 导出 ---------- */
+document.getElementById('btnExport').addEventListener('click', () => {
+  if(savedFormulas.length === 0){ toast('没有可导出的公式'); return; }
+  const text = savedFormulas.map(f => f.name + ' | ' + f.formula).join('\n');
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '我的魔方公式.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 2000);
+  toast('已导出 ' + savedFormulas.length + ' 条公式');
+});
+
+const fileInput = document.getElementById('fileInput');
+document.getElementById('btnImport').addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', e => {
+  const file = e.target.files && e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result || '');
+    const lines = text.split(/\r?\n/);
+    let added = 0;
+    for(let i=0;i<lines.length;i++){
+      const line = lines[i].trim();
+      if(!line) continue;
+
+      let name = '', formula = '';
+      const m = line.match(/^(.+?)\s*[|｜:：]\s*(.+)$/);
+      if(m){
+        name = m[1].trim();
+        formula = m[2].trim();
+      }else{
+        formula = line;
+      }
+
+      const cleaned = normalizeFormula(formula);
+      if(expandFormula(cleaned)){
+        if(!name) name = '导入公式 ' + (savedFormulas.length + 1);
+        savedFormulas.push({name, formula: cleaned});
+        added++;
+      }
+    }
+    persist();
+    toast(added > 0 ? ('成功导入 ' + added + ' 条公式') : '未识别到有效公式');
+  };
+  reader.readAsText(file, 'utf-8');
+  e.target.value = '';
+});
+
+/* =========================================================
+   13. F / D 状态显示
+   ========================================================= */
+const fSwatch = document.getElementById('fSwatch');
+const dSwatch = document.getElementById('dSwatch');
+const fText   = document.getElementById('fText');
+const dText   = document.getElementById('dText');
+
+function updateFBadge(){
+  const {F, D} = getViewAxes();
+  const fc = centerColors[F.axis.join(',')];
+  const dc = centerColors[D.axis.join(',')];
+  fSwatch.style.background = fc;
+  dSwatch.style.background = dc;
+  fText.textContent = 'F:' + (COLOR_NAMES[fc] || '—');
+  dText.textContent = 'D:' + (COLOR_NAMES[dc] || '—');
+}
+
+/* =========================================================
+   14. 主循环 & 启动
+   ========================================================= */
+function loop(now){
+  updateAnim(now);
+  render();
+  updateFBadge();
+  requestAnimationFrame(loop);
+}
+
+function init(){
+  resetCube();
+
+  loadSaved();
+  renderSavedList();
+
+  resize();
+  if(window.ResizeObserver){
+    new ResizeObserver(resize).observe(viewport);
+  }else{
+    window.addEventListener('resize', resize);
+  }
+  window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+
+  document.addEventListener('gesturestart', e => e.preventDefault());
+
+  requestAnimationFrame(loop);
+}
+
+init();
+</script>
+</body>
+</html>
