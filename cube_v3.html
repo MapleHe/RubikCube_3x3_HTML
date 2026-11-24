@@ -571,7 +571,7 @@ function normalizeFormula(str){
 const MAX_FORMULA_MOVES = 10000;
 
 function expandFormula(formula){
-  const tokenRe = /([RLUDBFrludbfMESxyz](?:2'?|')?)|(\()|\)(\d*)/gy;
+  const tokenRe = /([RLUDBFrludbfMESxyz](?:2'?|'2?)?)|(\()|\)(\d*)/gy;
   const groups = [[]];
 
   while(tokenRe.lastIndex < formula.length){
@@ -582,7 +582,8 @@ function expandFormula(formula){
     const [, move, open, count] = token;
     if(move){
       if(current.length >= MAX_FORMULA_MOVES) return null;
-      current.push(move);
+      // 正反方向的半转等效，统一使用 2 后缀。
+      current.push(move.endsWith("'2") ? move[0] + '2' : move);
     }else if(open){
       groups.push([]);
     }else{
