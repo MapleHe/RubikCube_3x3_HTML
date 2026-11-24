@@ -66,6 +66,9 @@
 
   .row{display:flex;gap:6px;margin-bottom:7px}
   .row > *{min-width:0}
+  .actions{flex-wrap:wrap}
+  .actions > button{min-width:max-content}
+  #btnScramble,#btnReset{flex:1}
 
   input[type=text]{
     flex:1 1 auto;background:#11141a;border:1px solid var(--line);border-radius:9px;
@@ -88,6 +91,9 @@
   button.primary:active{background:#255fa8}
   button.ghost{background:transparent;border-color:var(--line);color:var(--muted)}
   button.sm{padding:8px 10px;font-size:13px}
+  @media (max-width:360px){
+    .actions > button.sm{padding-inline:6px}
+  }
 
   #btnMode{
     flex:0 0 auto;background:#1d4e8f;border-color:#2a6ab8;color:#dceaff;font-size:13px;
@@ -134,7 +140,6 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;
     letter-spacing:-.3px;word-spacing:-2px;
   }
-  .saved-item .empty{font-size:12px;color:#5c6474;padding:6px 2px}
   .empty-tip{font-size:12px;color:#5c6474;padding:6px 2px}
 
   #toast{
@@ -153,7 +158,7 @@
 <div id="viewport">
   <canvas id="cv"></canvas>
   <div id="viewStatus">
-    <div id="hint">单指拖动旋转 · 双指捏合缩放 · 双指扭转</div>
+    <div id="hint">拖动旋转 · 双指缩放或扭转</div>
     <div id="fBadge">
       <span class="sw" id="fSwatch"></span><span id="fText">F:—</span>
       <span class="sep">;</span>
@@ -168,11 +173,11 @@
     <button class="primary" id="btnReverse">↺ 反推</button>
   </div>
 
-  <div class="row">
+  <div class="row actions">
     <button id="btnMode" class="sm">✏️ 输入模式</button>
-    <button class="sm" id="btnScramble" style="flex:1">🎲 随机打乱</button>
-    <button class="sm" id="btnReset" style="flex:1">⟲ 复位</button>
-    <button class="sm ghost" id="btnClearInput" style="flex:0 0 auto">清空</button>
+    <button class="sm" id="btnScramble">🎲 随机打乱</button>
+    <button class="sm" id="btnReset">⟲ 复位</button>
+    <button class="sm ghost" id="btnClearInput">清空</button>
   </div>
 
   <div id="keyArea">
@@ -288,12 +293,6 @@ const FACE_DEFS = [
   {n:[ 0, 0,-1], c:[[ 1,-1,-1],[-1,-1,-1],[-1, 1,-1],[ 1, 1,-1]]}
 ];
 
-const VIEW_DIRS = {
-  U:[0, 1, 0], D:[0,-1, 0],
-  F:[0, 0, 1], B:[0, 0,-1],
-  R:[1, 0, 0], L:[-1, 0, 0]
-};
-
 /* =========================================================
    3. 魔方数据
    ========================================================= */
@@ -310,7 +309,22 @@ function updateCenterColors(){
   }
 }
 
-function buildCubies(){
+function buildCubies(bottomColor){
+  const bottom = FACE_DEFS.find(({n}) => STICKER_COLORS[n.join(',')] === bottomColor).n;
+  let colors = STICKER_COLORS;
+  if(bottom[1] !== -1){
+    // 整体旋转配色，将所选面转到底部，保留各面的相对顺序。
+    const rotation = bottom[1] === 1
+      ? qFromAxis(1,0,0,Math.PI)
+      : qFromAxis(bottom[2],0,-bottom[0],Math.PI/2);
+    const mat = qToMat(rotation);
+    colors = {};
+    for(const {n} of FACE_DEFS){
+      const rotated = mv(mat, n).map(v => Math.round(v));
+      colors[rotated.join(',')] = STICKER_COLORS[n.join(',')];
+    }
+  }
+
   const list = [];
   for(let x=-1;x<=1;x++){
     for(let y=-1;y<=1;y++){
@@ -322,9 +336,9 @@ function buildCubies(){
           if(x*n[0] + y*n[1] + z*n[2] === 1){
             const key = n.join(',');
             stickers.push({
-              n: n.slice(),
+              n,
               corners: f.c,
-              color: STICKER_COLORS[key]
+              color: colors[key]
             });
           }
         }
@@ -362,8 +376,8 @@ const ctx      = canvas.getContext('2d');
 
 let vpW = 300, vpH = 300, dpr = 1;
 
-const CUBIE_SCALE = 0.94;
-const CAM_DIST    = 8.0;
+const STICKER_HALF = 0.47;
+const CAM_DIST = 8;
 
 function resize(){
   const rect = viewport.getBoundingClientRect();
@@ -374,6 +388,7 @@ function resize(){
   canvas.height = Math.round(vpH * dpr);
   canvas.style.width  = vpW + 'px';
   canvas.style.height = vpH + 'px';
+  requestRender();
 }
 
 function render(){
@@ -383,63 +398,37 @@ function render(){
   const R = qToMat(quat);
   const cx = vpW/2, cy = vpH/2;
   const focal = Math.min(vpW,vpH) * 1.28 * zoom;
-  const dist  = CAM_DIST;
   const faces = [];
 
-  for(let i=0;i<cubies.length;i++){
-    const cubie = cubies[i];
-    const p = cubie.pos, m = cubie.mat;
-    const sts = cubie.stickers;
+  for(const {pos, mat, stickers} of cubies){
+    const [px, py, pz] = mv(R, pos);
+    const viewMat = mm(R, mat);
 
-    for(let s=0;s<sts.length;s++){
-      const st = sts[s];
-      const wn = mv(m, st.n);
-      const vn = mv(R, wn);
-      if(vn[2] <= 0.02) continue;
+    for(const {n, corners, color} of stickers){
+      const [nx, ny, nz] = mv(viewMat, n);
+      // 法线与指向相机的向量点积为正时，透视相机才能看到贴纸正面。
+      if(nz * (CAM_DIST - pz) - nx * px - ny * py <= STICKER_HALF) continue;
 
-      const ccx = p[0] + wn[0]*0.5;
-      const ccy = p[1] + wn[1]*0.5;
-      const ccz = p[2] + wn[2]*0.5;
-      const vcz = R[6]*ccx + R[7]*ccy + R[8]*ccz;
-      const depth = dist - vcz;
-      if(depth <= 0.4) continue;
-
-      const pts = [];
-      const cs = st.corners;
-      for(let k=0;k<4;k++){
-        const c = cs[k];
-        const lx = c[0]*0.5*CUBIE_SCALE;
-        const ly = c[1]*0.5*CUBIE_SCALE;
-        const lz = c[2]*0.5*CUBIE_SCALE;
-
-        const wx = m[0]*lx + m[1]*ly + m[2]*lz + p[0];
-        const wy = m[3]*lx + m[4]*ly + m[5]*lz + p[1];
-        const wz = m[6]*lx + m[7]*ly + m[8]*lz + p[2];
-
-        const vx = R[0]*wx + R[1]*wy + R[2]*wz;
-        const vy = R[3]*wx + R[4]*wy + R[5]*wz;
-        const vz = R[6]*wx + R[7]*wy + R[8]*wz;
-
-        const d2 = dist - vz;
-        pts.push([ cx + focal*vx/d2, cy - focal*vy/d2 ]);
-      }
-      faces.push({depth, pts, color: st.color});
+      const pts = corners.map(corner => {
+        const [x, y, z] = mv(viewMat, corner);
+        const scale = focal / (CAM_DIST - pz - z * STICKER_HALF);
+        return [cx + (px + x * STICKER_HALF) * scale, cy - (py + y * STICKER_HALF) * scale];
+      });
+      faces.push({depth: CAM_DIST - pz - nz * STICKER_HALF, pts, color});
     }
   }
 
   faces.sort((a,b)=> b.depth - a.depth);
 
-  for(let i=0;i<faces.length;i++){
-    const f = faces[i];
-    const pts = f.pts;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(0,0,0,.5)';
+  for(const {pts, color} of faces){
     ctx.beginPath();
     ctx.moveTo(pts[0][0], pts[0][1]);
     for(let k=1;k<4;k++) ctx.lineTo(pts[k][0], pts[k][1]);
     ctx.closePath();
-    ctx.fillStyle = f.color;
+    ctx.fillStyle = color;
     ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(0,0,0,.5)';
     ctx.stroke();
   }
 }
@@ -447,18 +436,9 @@ function render(){
 /* =========================================================
    6. 转动引擎
    ========================================================= */
-let moveQueue = [];
+const moveQueue = [];
 let animState = null;
 const ANIM_DUR = 115;
-
-function viewToWorld(v){
-  const R = qToMat(quat);
-  return [
-    R[0]*v[0] + R[3]*v[1] + R[6]*v[2],
-    R[1]*v[0] + R[4]*v[1] + R[7]*v[2],
-    R[2]*v[0] + R[5]*v[1] + R[8]*v[2]
-  ];
-}
 
 function snapAxis(v, excludedIdx = -1){
   if(excludedIdx >= 0) v[excludedIdx] = 0;
@@ -479,8 +459,9 @@ function getViewAxes(){
   if(frameQuat === quat) return viewAxes;
 
   // 先选正面，再在与正面垂直的方向中选底面。
-  const f = snapAxis(viewToWorld(VIEW_DIRS.F));
-  const d = snapAxis(viewToWorld(VIEW_DIRS.D), f.idx);
+  const R = qToMat(quat);
+  const f = snapAxis(R.slice(6, 9));
+  const d = snapAxis([-R[3], -R[4], -R[5]], f.idx);
   const r = [
     f.axis[1]*d.axis[2] - f.axis[2]*d.axis[1],
     f.axis[2]*d.axis[0] - f.axis[0]*d.axis[2],
@@ -496,12 +477,15 @@ function getViewAxes(){
   return viewAxes;
 }
 
+const SLICE_FACES = {M:'L', E:'D', S:'F'};
+// 整体转动方向分别与 R / U / F 一致。
+const ROTATION_FACES = {x:'R', y:'U', z:'F'};
+
 function makeMove(token, inverse){
   const face = token[0];
   const upper = face.toUpperCase();
-  const sliceFace = {M:'L', E:'D', S:'F'}[upper];
-  // 整体转动方向分别与 R / U / F 一致，三个层一起转动。
-  const rotationFace = {x:'R', y:'U', z:'F'}[face];
+  const sliceFace = SLICE_FACES[upper];
+  const rotationFace = ROTATION_FACES[face];
   const {axis, idx, sign} = getViewAxes()[rotationFace || sliceFace || upper];
   const layerVals = rotationFace ? [-1, 0, 1] : sliceFace ? [0] : face === upper ? [sign] : [sign, 0];
   const suffix = token.slice(1);
@@ -523,13 +507,13 @@ function pump(){
   const m = moveQueue.shift();
 
   const snaps = [];
-  for(let i=0;i<cubies.length;i++){
-    const c = cubies[i];
-    if(m.layerVals.indexOf(Math.round(c.pos[m.axisIdx])) >= 0){
-      snaps.push({c, pos: c.pos.slice(), mat: c.mat.slice()});
+  for(const c of cubies){
+    if(m.layerVals.includes(c.pos[m.axisIdx])){
+      snaps.push({c, pos: c.pos, mat: c.mat});
     }
   }
   animState = {snaps, axis: m.axis, total: m.total, start: performance.now()};
+  requestRender();
 }
 
 function updateAnim(now){
@@ -540,19 +524,16 @@ function updateAnim(now){
   const a = animState.axis;
   const rot = qToMat(qFromAxis(a[0], a[1], a[2], ang));
 
-  const snaps = animState.snaps;
-  for(let i=0;i<snaps.length;i++){
-    const s = snaps[i];
-    s.c.pos = mv(rot, s.pos);
-    s.c.mat = mm(rot, s.mat);
+  for(const {c, pos, mat} of animState.snaps){
+    c.pos = mv(rot, pos);
+    c.mat = mm(rot, mat);
+    if(t === 1){
+      c.pos = c.pos.map(v => Math.round(v) + 0);
+      c.mat = c.mat.map(v => Math.round(v) + 0);
+    }
   }
 
-  if(t >= 1){
-    for(let i=0;i<snaps.length;i++){
-      const s = snaps[i];
-      s.c.pos = s.c.pos.map(v => Math.round(v) + 0);
-      s.c.mat = s.c.mat.map(v => Math.round(v) + 0);
-    }
+  if(t === 1){
     animState = null;
     updateCenterColors();
     pump();
@@ -583,7 +564,7 @@ function expandFormula(formula){
     if(move){
       if(current.length >= MAX_FORMULA_MOVES) return null;
       // 正反方向的半转等效，统一使用 2 后缀。
-      current.push(move.endsWith("'2") ? move[0] + '2' : move);
+      current.push(move.includes('2') ? move[0] + '2' : move);
     }else if(open){
       groups.push([]);
     }else{
@@ -602,34 +583,24 @@ function expandFormula(formula){
 /* =========================================================
    9. 复位 / 打乱
    ========================================================= */
-function resetCube(){
+function resetCube(bottomColor = STICKER_COLORS['0,-1,0']){
   moveQueue.length = 0;
   animState = null;
-  cubies = buildCubies();
+  cubies = buildCubies(bottomColor);
   updateCenterColors();
   randomizeView();
+  requestRender();
 }
 
 function scramble(){
   const faces = ['R','L','U','D','B','F'];
-  const last = [];
   const seq = [];
   for(let i=0;i<22;i++){
-    let f, guard = 0;
-    do{
-      f = faces[Math.floor(Math.random()*6)];
-      guard++;
-    }while(last.indexOf(f) >= 0 && guard < 30);
-    last.push(f);
-    if(last.length > 2) last.shift();
-
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    const turns = Math.random() < 0.22 ? 2 : 1;
-
-    let t = f;
-    if(turns === 2) t += '2';
-    else if(dir === -1) t += "'";
-    seq.push(t);
+    const recent = seq.slice(-2).map(token => token[0]);
+    const choices = faces.filter(face => !recent.includes(face));
+    const face = choices[Math.floor(Math.random() * choices.length)];
+    const suffix = Math.random() < 0.22 ? '2' : Math.random() < 0.5 ? "'" : '';
+    seq.push(face + suffix);
   }
   enqueueMoves(seq);
 }
@@ -637,8 +608,7 @@ function scramble(){
 /* =========================================================
    10. 触摸交互
    ========================================================= */
-let pointers = new Map();
-let drag = null;
+const pointers = new Map();
 let pinch = null;
 
 function rotateView(dx, dy){
@@ -646,12 +616,13 @@ function rotateView(dx, dy){
   const q1 = qFromAxis(0,1,0, dx*k);
   const q2 = qFromAxis(1,0,0, dy*k);
   quat = qNormalize(qMul(qMul(q2,q1), quat));
+  requestRender();
 }
 
-function getTwoPointers(){
-  const arr = [];
-  for(const v of pointers.values()) arr.push(v);
-  return arr.length >= 2 ? [arr[0], arr[1]] : null;
+function measurePinch(){
+  const [a, b] = pointers.values();
+  const dx = b.x - a.x, dy = b.y - a.y;
+  return {distance: Math.hypot(dx, dy), angle: Math.atan2(dy, dx)};
 }
 
 canvas.addEventListener('pointerdown', e => {
@@ -660,57 +631,36 @@ canvas.addEventListener('pointerdown', e => {
   try{ canvas.setPointerCapture(e.pointerId); }catch(_){}
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
 
-  if(pointers.size === 1){
-    drag  = {x:e.clientX, y:e.clientY};
-    pinch = null;
-  }else if(pointers.size === 2){
-    const p = getTwoPointers();
-    pinch = {
-      d: Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y),
-      a: Math.atan2(p[1].y-p[0].y, p[1].x-p[0].x)
-    };
-  }
+  if(pointers.size === 2) pinch = measurePinch();
 });
 
 canvas.addEventListener('pointermove', e => {
-  if(!pointers.has(e.pointerId)) return;
+  const previous = pointers.get(e.pointerId);
+  if(!previous) return;
   e.preventDefault();
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
 
-  if(pointers.size === 1 && drag){
-    const dx = e.clientX - drag.x;
-    const dy = e.clientY - drag.y;
-    drag.x = e.clientX;
-    drag.y = e.clientY;
+  if(pointers.size === 1){
+    const dx = e.clientX - previous.x;
+    const dy = e.clientY - previous.y;
     if(dx || dy) rotateView(dx, dy);
-  }else if(pointers.size === 2 && pinch){
-    const p = getTwoPointers();
-    const d   = Math.hypot(p[0].x-p[1].x, p[0].y-p[1].y);
-    const ang = Math.atan2(p[1].y-p[0].y, p[1].x-p[0].x);
-
-    if(pinch.d > 12 && d > 12){
-      zoom = clamp(zoom * (d / pinch.d), 0.55, 3.0);
-
-      let dAng = ang - pinch.a;
+  }else{
+    const current = measurePinch();
+    if(pinch.distance > 12 && current.distance > 12){
+      zoom = clamp(zoom * (current.distance / pinch.distance), 0.55, 3.0);
+      let dAng = current.angle - pinch.angle;
       if(dAng >  Math.PI) dAng -= Math.PI*2;
       if(dAng < -Math.PI) dAng += Math.PI*2;
       // 屏幕 Y 轴向下，三维坐标 Y 轴向上。
       quat = qNormalize(qMul(qFromAxis(0,0,1, -dAng), quat));
+      requestRender();
     }
-    pinch.d = d;
-    pinch.a = ang;
+    pinch = current;
   }
 });
 
 function onPointerUp(e){
-  if(!pointers.delete(e.pointerId)) return;
-  if(pointers.size === 0){
-    drag = null; pinch = null;
-  }else if(pointers.size === 1){
-    pinch = null;
-    const p = pointers.values().next().value;
-    drag = {x:p.x, y:p.y};
-  }
+  if(pointers.delete(e.pointerId)) pinch = null;
 }
 canvas.addEventListener('pointerup', onPointerUp);
 canvas.addEventListener('pointercancel', onPointerUp);
@@ -735,58 +685,42 @@ function toast(msg){
 }
 
 /* ---------- 按键布局 ---------- */
-function makeBtns(arr){
-  return arr.map(m => '<button data-move="' + m + '">' + m + '</button>').join('');
-}
-
-function buildKeys(){
-  // 最左：L 系 ；最右：R 系
-  document.getElementById('kgL').innerHTML = makeBtns(["L'", 'L', "l'", 'l']);
-  document.getElementById('kgR').innerHTML = makeBtns(["r'", 'r', "R'", 'R']);
-  // D / B 及对应宽层的正反向按键交换位置。
-  document.getElementById('kgP').innerHTML = makeBtns(["U'", 'D', "F'", 'B']);
-  document.getElementById('kgN').innerHTML = makeBtns(["B'", 'F', "D'", 'U']);
-  document.getElementById('kgWideInverse').innerHTML = makeBtns(["u'", 'd', "f'", 'b']);
-  document.getElementById('kgWide').innerHTML = makeBtns(["b'", 'f', "d'", 'u']);
-  // 中层
-  document.getElementById('kgS').innerHTML = makeBtns(["S'", 'E', 'M', "M'", "E'", "S'"]);
-  // 整体转动
-  document.getElementById('kgRotation').innerHTML = makeBtns(['x', "x'", 'y', "y'", 'z', "z'"]);
-}
-buildKeys();
-
-function handleKeyClick(mv){
-  if(!mv) return;
-  if(mode === 'input'){
-    formulaInput.value = formulaInput.value.trimEnd() + mv;
-    formulaInput.scrollLeft = formulaInput.scrollWidth;
-  }
-  enqueueMoves([mv]);
+const KEY_GROUPS = {
+  kgL: "L' L l' l",
+  kgR: "r' r R' R",
+  kgP: "U' D F' B",
+  kgN: "B' F D' U",
+  kgWideInverse: "u' d f' b",
+  kgWide: "b' f d' u",
+  kgS: "S' E M M' E' S",
+  kgRotation: "x x' y y' z z'"
+};
+for(const [id, moves] of Object.entries(KEY_GROUPS)){
+  document.getElementById(id).innerHTML = moves.split(' ').map(move =>
+    `<button data-move="${move}">${move}</button>`
+  ).join('');
 }
 
 document.getElementById('keyArea').addEventListener('click', e => {
-  const b = e.target.closest('button');
-  if(b) handleKeyClick(b.getAttribute('data-move'));
+  const button = e.target.closest('button[data-move]');
+  if(!button) return;
+  const move = button.dataset.move;
+  if(mode === 'input'){
+    formulaInput.value = formulaInput.value.trimEnd() + move;
+    formulaInput.scrollLeft = formulaInput.scrollWidth;
+  }
+  enqueueMoves([move]);
 });
 
 /* ---------- 模式切换 ---------- */
-function updateModeUI(){
-  if(mode === 'input'){
-    btnMode.textContent = '✏️ 输入模式';
-    btnMode.classList.remove('operate');
-    formulaInput.classList.remove('dimmed');
-  }else{
-    btnMode.textContent = '🖐 操作模式';
-    btnMode.classList.add('operate');
-    formulaInput.classList.add('dimmed');
-  }
-}
 btnMode.addEventListener('click', () => {
-  mode = (mode === 'input') ? 'operate' : 'input';
-  updateModeUI();
-  toast(mode === 'input' ? '公式输入模式：按键会写入公式' : '操作模式：按键只转动魔方');
+  const operate = mode === 'input';
+  mode = operate ? 'operate' : 'input';
+  btnMode.textContent = operate ? '🖐 操作模式' : '✏️ 输入模式';
+  btnMode.classList.toggle('operate', operate);
+  formulaInput.classList.toggle('dimmed', operate);
+  toast(operate ? '操作模式：按键只转动魔方' : '公式输入模式：按键会写入公式');
 });
-updateModeUI();
 
 /* ---------- 粘贴清洗 ---------- */
 formulaInput.addEventListener('paste', e => {
@@ -798,10 +732,7 @@ formulaInput.addEventListener('paste', e => {
   const cleaned = normalizeFormula(text);
   const start = formulaInput.selectionStart ?? formulaInput.value.length;
   const end   = formulaInput.selectionEnd   ?? formulaInput.value.length;
-  const cur   = formulaInput.value;
-  formulaInput.value = cur.slice(0,start) + cleaned + cur.slice(end);
-  const pos = start + cleaned.length;
-  try{ formulaInput.setSelectionRange(pos, pos); }catch(_){}
+  formulaInput.setRangeText(cleaned, start, end, 'end');
 });
 
 /* ---------- 反推 ---------- */
@@ -823,8 +754,9 @@ document.getElementById('btnScramble').addEventListener('click', () => {
 });
 
 document.getElementById('btnReset').addEventListener('click', () => {
-  resetCube();
-  toast('魔方已复位（白底朝下）');
+  const bottomColor = displayedDColor;
+  resetCube(bottomColor);
+  toast('魔方已复位（' + COLOR_NAMES[bottomColor] + '底朝下）');
 });
 
 document.getElementById('btnClearInput').addEventListener('click', () => {
@@ -950,7 +882,8 @@ fileInput.addEventListener('change', e => {
       if(!line) continue;
 
       let name = '', formula = '';
-      const m = line.match(/^(.+?)\s*[|｜:：]\s*(.+)$/);
+      // 公式不含这些分隔符，取最后一个可保留名称中的分隔符。
+      const m = line.match(/^(.*)[|｜:：]\s*(.+)$/);
       if(m){
         name = m[1].trim();
         formula = m[2].trim();
@@ -968,6 +901,7 @@ fileInput.addEventListener('change', e => {
     persist();
     toast(added > 0 ? ('成功导入 ' + added + ' 条公式') : '未识别到有效公式');
   };
+  reader.onerror = () => toast('无法读取公式文件');
   reader.readAsText(file, 'utf-8');
   e.target.value = '';
 });
@@ -979,11 +913,13 @@ const fSwatch = document.getElementById('fSwatch');
 const dSwatch = document.getElementById('dSwatch');
 const fText   = document.getElementById('fText');
 const dText   = document.getElementById('dText');
+let displayedDColor = STICKER_COLORS['0,-1,0'];
 
 function updateFBadge(){
   const {F, D} = getViewAxes();
   const fc = centerColors[F.axis.join(',')];
   const dc = centerColors[D.axis.join(',')];
+  displayedDColor = dc;
   fSwatch.style.background = fc;
   dSwatch.style.background = dc;
   fText.textContent = 'F:' + (COLOR_NAMES[fc] || '—');
@@ -993,11 +929,18 @@ function updateFBadge(){
 /* =========================================================
    14. 主循环 & 启动
    ========================================================= */
-function loop(now){
+let renderFrame = null;
+
+function requestRender(){
+  if(renderFrame === null) renderFrame = requestAnimationFrame(drawFrame);
+}
+
+function drawFrame(now){
   updateAnim(now);
   render();
   updateFBadge();
-  requestAnimationFrame(loop);
+  renderFrame = null;
+  if(animState) requestRender();
 }
 
 function init(){
@@ -1015,8 +958,6 @@ function init(){
   window.addEventListener('orientationchange', () => setTimeout(resize, 120));
 
   document.addEventListener('gesturestart', e => e.preventDefault());
-
-  requestAnimationFrame(loop);
 }
 
 init();
